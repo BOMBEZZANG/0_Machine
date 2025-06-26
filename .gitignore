@@ -1,0 +1,30 @@
+# .gitignore 파일에 이 내용을 복사해서 붙여넣으세요.
+
+# Python 가상환경
+dbmachine2/
+venv/
+env/
+
+# Python 캐시 파일
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 빌드, 배포 관련 폴더
+build/
+dist/
+*.egg-info/
+*.spec
+
+# macOS 시스템 파일
+.DS_Store
+
+# 로그 및 데이터베이스 파일
+*.log
+*.db
+*.sqlite3
+
+# 개인 설정 및 민감 정보
+auto_token.pickle
+credentials.json
