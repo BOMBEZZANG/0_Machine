@@ -25,7 +25,7 @@ class PDFBatchProcessor:
         self.root.title("PDF Batch Processor - DB 생성 도구")
         self.root.geometry("800x600")
         
-        self.default_folder = os.path.expanduser("~/Desktop")
+        self.default_folder = os.path.expanduser("~/Desktop/Apps/qcjongmin/appauto/raw_DB/rawdbs/")
         self.selected_folder = ""
         
         self.total_files = 0
@@ -90,6 +90,11 @@ class PDFBatchProcessor:
         
         self.finish_button = ttk.Button(self.correction_frame, text="수정 모드 종료", command=self.finish_correction_mode)
         self.finish_button.grid(row=0, column=2, padx=5, pady=5)
+        
+        
+        # [추가] 카테고리 업데이트 버튼
+        self.category_update_button = ttk.Button(main_frame, text="선택된 폴더의 모든 DB에 카테고리 정보 업데이트", command=self.start_category_update_process)
+        self.category_update_button.grid(row=5, column=0, columnspan=2, pady=10, sticky=tk.W)
 
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
@@ -413,6 +418,58 @@ class PDFBatchProcessor:
             self.log_text.insert(tk.END, message + "\n")
             self.log_text.see(tk.END)
         self.root.after(0, update_log)
+    def start_category_update_process(self):
+        """UI의 버튼을 통해 카테고리 업데이트 프로세스를 시작합니다."""
+        if not self.selected_folder:
+            messagebox.showerror("오류", "먼저 폴더를 선택해주세요.")
+            return
+
+        self.log_message("\n" + "="*50)
+        self.log_message("카테고리 정보 일괄 업데이트 시작...")
+
+        # 비동기 실행을 위해 스레드 사용
+        threading.Thread(target=self.run_category_update_logic).start()
+
+    # in 0_Machine.py -> PDFBatchProcessor 클래스
+
+# in 0_Machine.py
+
+    def run_category_update_logic(self):
+        """
+        [수정] 실제 카테고리 업데이트 로직을 실행하며, 기준 PDF에서 시험명을 추출하여 전달합니다.
+        """
+        try:
+            # 1. 가장 최신 PDF 파일 찾기
+            pdf_files = self.get_pdf_files(self.selected_folder)
+            if not pdf_files:
+                self.log_message("오류: 처리할 PDF 파일을 찾을 수 없습니다.")
+                messagebox.showerror("오류", "폴더에서 처리할 PDF 파일을 찾을 수 없습니다.")
+                return
+
+            master_pdf_path = sorted(pdf_files, reverse=True)[0]
+
+            # [추가] 기준 PDF 파일명에서 시험명(카테고리명) 추출
+            pdf_filename = os.path.basename(master_pdf_path)
+            match = re.search(r"^(.*?)\d{8}\(교사용\)\.pdf$", pdf_filename)
+            exam_name = match.group(1) if match else os.path.splitext(pdf_filename)[0]
+            self.log_message(f"파일명 기반 시험명: '{exam_name}'")
+
+            # 2. PDFProcessor의 카테고리 업데이트 함수 호출 (시험명 전달)
+            processor = PDFProcessor()
+            success, message = processor.update_all_db_categories(self.selected_folder, exam_name)
+            
+            self.log_message(message)
+            
+            if success:
+                messagebox.showinfo("완료", "카테고리 정보 업데이트가 완료되었습니다.")
+            else:
+                # 오류 메시지는 message 변수 안에 포함되어 이미 로깅됨
+                messagebox.showerror("오류", "카테고리 정보 업데이트 중 오류가 발생했습니다.")
+
+        except Exception as e:
+            error_msg = f"카테고리 업데이트 중 심각한 오류 발생: {e}"
+            self.log_message(error_msg)
+            messagebox.showerror("오류", error_msg)
 
 def main():
     try:

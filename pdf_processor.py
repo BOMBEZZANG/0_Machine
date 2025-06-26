@@ -189,6 +189,56 @@ class PDFProcessor:
         except Exception as e:
             return False, f"검증 중 오류: {str(e)}"
 
+# pdf_processor.py 파일의 PDFProcessor 클래스 내부에 아래 함수를 추가하세요.
+# in pdf_processor.py
+
+    def update_all_db_categories(self, folder_path: str, exam_name: str) -> Tuple[bool, str]:
+        """
+        [수정] 폴더 내 모든 DB에 카테고리 정보를 일괄 업데이트합니다. exam_name을 인자로 받습니다.
+        """
+        log_messages = []
+        try:
+            # 1. 가장 최신 PDF 파일 찾기 (기존과 동일)
+            all_pdfs = self.get_pdf_files_info(folder_path)
+            if not all_pdfs:
+                return False, "처리할 PDF 파일이 없습니다."
+
+            master_pdf_path = all_pdfs[-1]['full_path']
+            log_messages.append(f"기준 PDF 파일: '{os.path.basename(master_pdf_path)}'")
+            log_messages.append("카테고리 범위 분석 중...")
+
+            # 2. 카테고리 범위 추출 (기존과 동일)
+            category_ranges = pdf_to_db.extract_category_ranges(master_pdf_path)
+
+            if not category_ranges:
+                return False, "오류: 기준 PDF에서 카테고리 정보를 추출하지 못했습니다."
+
+            log_messages.append("카테고리 범위 분석 완료:")
+            for cat in category_ranges:
+                log_messages.append(f"  - {cat['name']}: 문제 {cat['start_q_num']} ~ {cat['end_q_num']}")
+
+            # 3. DB 파일 찾아 업데이트 (기존과 동일)
+            db_files_to_update = [f for f in os.listdir(folder_path) if re.match(r'^question\d+\.db$', f)]
+            if not db_files_to_update:
+                log_messages.append("업데이트할 DB 파일이 없습니다. 먼저 'PDF->DB 변환'을 실행하세요.")
+                return True, "\n".join(log_messages)
+
+            log_messages.append(f"\n총 {len(db_files_to_update)}개의 DB 파일에 카테고리 정보 적용 시작...")
+            for db_filename in sorted(db_files_to_update):
+                db_path = os.path.join(folder_path, db_filename)
+                try:
+                    # [수정] apply_categories_to_db 함수에 exam_name 인자 전달
+                    pdf_to_db.apply_categories_to_db(db_path, category_ranges, exam_name)
+                    log_messages.append(f"  - '{db_filename}' 업데이트 성공")
+                except Exception as e:
+                    log_messages.append(f"  - '{db_filename}' 업데이트 실패: {e}")
+            
+            log_messages.append("카테고리 정보 일괄 업데이트 완료!")
+            return True, "\n".join(log_messages)
+
+        except Exception as e:
+            return False, f"카테고리 업데이트 중 오류 발생: {e}"
+
 # 독립 실행을 위한 테스트 함수
 def test_single_pdf(pdf_path: str):
     processor = PDFProcessor()
@@ -207,6 +257,8 @@ def test_single_pdf(pdf_path: str):
     print(f"  - 이슈 있음: {result.get('has_issues')}")
     if result.get('issues'):
         print("  - 이슈 상세:\n" + "\n".join(result['issues']))
+
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

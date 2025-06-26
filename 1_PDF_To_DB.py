@@ -941,7 +941,176 @@ def get_last_question_number_from_db(db_path: str) -> int:
     except Exception as e:
         print(f"마지막 문제번호 확인 중 오류: {e}")
         return 0
+    
+# 1_PDF_To_DB.py 파일 맨 마지막에 추가
 
+def find_nearest_question_above(marker_bbox: fitz.Rect, marker_page_num: int, all_questions: List[QuestionMarker], doc: fitz.Document) -> Optional[QuestionMarker]:
+    """
+    주어진 마커 위치 바로 위에 있는 문제 번호를 복잡한 레이아웃을 고려하여 찾습니다.
+    """
+    column_midpoint = doc[marker_page_num].rect.width / 2
+    
+    # 1. 같은 페이지, 같은 단에서 바로 위에 있는 문제 찾기
+    marker_is_left = marker_bbox.x0 < column_midpoint
+    candidates = []
+    for q in all_questions:
+        if q.page_num == marker_page_num:
+            q_is_left = q.bbox.x0 < column_midpoint
+            if marker_is_left == q_is_left and q.bbox.y1 < marker_bbox.y0:
+                candidates.append(q)
+    if candidates:
+        return max(candidates, key=lambda c: c.bbox.y1) # 가장 가까운(y값이 가장 큰) 문제
+
+    # 2. 페이지/단 경계 케이스 처리
+    # 2-1. 마커가 왼쪽 단 최상단 근처에 있는 경우 -> 이전 페이지 마지막 문제
+    if marker_is_left and marker_bbox.y0 < 100: # 100은 임의의 임계값
+        prev_page_questions = [q for q in all_questions if q.page_num == marker_page_num - 1]
+        if prev_page_questions:
+            return max(prev_page_questions, key=lambda q: q.question_num)
+            
+    # 2-2. 마커가 오른쪽 단 최상단 근처에 있는 경우 -> 같은 페이지 왼쪽 단 마지막 문제
+    if not marker_is_left and marker_bbox.y0 < 100:
+        left_column_questions = [q for q in all_questions if q.page_num == marker_page_num and q.bbox.x0 < column_midpoint]
+        if left_column_questions:
+            return max(left_column_questions, key=lambda q: q.question_num)
+            
+    # 추가적인 복잡한 규칙은 여기에 계속 구현 가능...
+    
+    return None
+
+
+def extract_category_ranges(pdf_path: str) -> List[Dict]:
+    """
+    [디버깅 강화] 기준 PDF 파일에서 'N과목: 과목명'을 찾아 각 과목의 문제 번호 범위를 반환합니다.
+    """
+    print("\n--- 카테고리 추출 디버깅 시작 ---")
+    print(f"기준 파일: {os.path.basename(pdf_path)}")
+    
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        print(f"[실패] PDF 파일을 열 수 없습니다: {e}")
+        print("--- 카테고리 추출 디버깅 종료 ---")
+        return []
+
+    # --- 디버깅 체크포인트 1: 문제 번호 마커 찾기 ---
+    all_question_markers = map_all_question_starts(doc)
+    if not all_question_markers:
+        print("[실패] 이 PDF에서 문제 번호(예: '1.', '21.')를 하나도 찾지 못했습니다.")
+        doc.close()
+        print("--- 카테고리 추출 디버깅 종료 ---")
+        return []
+    
+    last_q_num_in_doc = all_question_markers[-1].question_num
+    print(f"[성공] 총 {len(all_question_markers)}개의 문제 번호를 찾았습니다. (첫 번호: {all_question_markers[0].question_num}, 마지막 번호: {last_q_num_in_doc})")
+
+    # --- 디버깅 체크포인트 2: 과목명 마커 찾기 ---
+    category_markers = []
+    cat_pattern = re.compile(r"(\d)\s*과목\s*:\s*(.+)")
+
+    for page_num in range(len(doc)):
+        # get_text("text")는 간단한 텍스트 추출에 더 효과적일 수 있습니다.
+        page_text = doc[page_num].get_text("text")
+        for line in page_text.split('\n'):
+            match = cat_pattern.match(line.strip())
+            if match:
+                # 과목명을 찾으면, 해당 텍스트의 위치(bbox)도 찾습니다.
+                text_instances = doc[page_num].search_for(line.strip())
+                if text_instances:
+                    category_markers.append({
+                        "num": int(match.group(1)),
+                        "name": match.group(2).strip(),
+                        "page_num": page_num,
+                        "bbox": text_instances[0] # 첫 번째 발견된 위치의 bbox 사용
+                    })
+
+    if not category_markers:
+        print("[실패] PDF에서 'N과목: 과목명' 패턴의 텍스트를 하나도 찾지 못했습니다.")
+        doc.close()
+        print("--- 카테고리 추출 디버깅 종료 ---")
+        return []
+        
+    print(f"[성공] 총 {len(category_markers)}개의 과목 마커를 찾았습니다:")
+    category_markers.sort(key=lambda x: x['num']) # 과목 번호 순으로 정렬
+    for marker in category_markers:
+        print(f"  - {marker['num']}과목: '{marker['name']}' (페이지: {marker['page_num'] + 1})")
+
+    # --- 디버깅 체크포인트 3: 카테고리 범위 계산 ---
+    category_ranges = []
+    for i, cat_marker in enumerate(category_markers):
+        current_cat_name = f"{cat_marker['num']}과목: {cat_marker['name']}"
+        start_q_num = 1
+        
+        if i > 0:
+            # 이전 과목의 끝 번호 + 1을 현재 과목의 시작 번호로 설정
+            prev_cat_end_num = category_ranges[i-1]['end_q_num']
+            start_q_num = prev_cat_end_num + 1
+
+        end_q_num = last_q_num_in_doc
+        if i + 1 < len(category_markers): # 다음 과목이 있다면
+            next_cat_marker = category_markers[i+1]
+            q_marker_before_next_cat = find_nearest_question_above(next_cat_marker['bbox'], next_cat_marker['page_num'], all_question_markers, doc)
+            
+            if q_marker_before_next_cat:
+                end_q_num = q_marker_before_next_cat.question_num
+                print(f"  - '{next_cat_marker['name']}' 앞 문제({end_q_num}번)를 기준으로 '{cat_marker['name']}'의 끝 범위를 설정했습니다.")
+            else:
+                print(f"  - 경고: '{next_cat_marker['name']}' 위의 문제 번호를 찾지 못해, 끝 범위를 문서의 마지막 번호로 설정합니다.")
+
+        category_ranges.append({
+            "name": current_cat_name,
+            "start_q_num": start_q_num,
+            "end_q_num": end_q_num
+        })
+        
+    doc.close()
+    print("--- 카테고리 추출 디버깅 종료 ---")
+    return category_ranges
+
+# in 1_PDF_To_DB.py
+
+def apply_categories_to_db(db_path: str, category_ranges: List[Dict], exam_name: str):
+    """
+    [수정] 주어진 DB 파일에 접속하여, 세 가지 규칙에 따라 카테고리명을 가공하고 업데이트합니다.
+    """
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"DB 파일을 찾을 수 없습니다: {db_path}")
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    try:
+        for cat_range in category_ranges:
+            original_cat_name = cat_range['name']
+            start_q = cat_range['start_q_num']
+            end_q = cat_range['end_q_num']
+
+            # --- [추가] 카테고리명 가공 로직 ---
+            final_cat_name = original_cat_name
+            
+            # 규칙 1: "N과목: " 접두사 제거
+            match = re.match(r"\d+\s*과목\s*:\s*(.+)", original_cat_name)
+            if match:
+                final_cat_name = match.group(1).strip()
+
+            # 규칙 2 & 3: 특정 이름일 경우 시험명으로 대체
+            if final_cat_name in ["과목 구분 없음", "임의 구분"]:
+                final_cat_name = exam_name
+            # ------------------------------------
+
+            query = "UPDATE questions SET Category = ? WHERE CAST(Question_Number AS INTEGER) BETWEEN ? AND ?"
+            cursor.execute(query, (final_cat_name, start_q, end_q))
+        
+        conn.commit()
+    
+    except Exception as e:
+        conn.rollback()
+        raise e
+    
+    finally:
+        conn.close()
+        
+        
 # 독립적인 테스트를 위한 main 실행 블록
 if __name__ == '__main__':
     # 이 파일을 직접 실행할 경우, 아래 코드가 실행됩니다.
