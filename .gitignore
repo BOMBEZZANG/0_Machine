@@ -28,3 +28,4 @@ dist/
 # 개인 설정 및 민감 정보
 auto_token.pickle
 credentials.json
+config.json
