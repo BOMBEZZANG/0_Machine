@@ -23,7 +23,7 @@ class PDFBatchProcessor:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF/DB Batch Processor")
-        self.root.geometry("800x650")
+        self.root.geometry("800x700") # 세로 길이 조정
         
         self.default_folder = os.path.expanduser("~/Desktop/Apps/qcjongmin/appauto/raw_DB/rawdbs/")
         self.selected_folder = ""
@@ -72,14 +72,17 @@ class PDFBatchProcessor:
         self.audio_button = ttk.Button(button_frame_2, text="3. 음성 생성(TTS)", command=lambda: self.start_external_script_process('3_description_audio.py'), state="disabled")
         self.audio_button.pack(side=tk.LEFT)
 
-        # [새로 추가된 버튼]
         button_frame_3 = ttk.Frame(main_frame)
         button_frame_3.grid(row=3, column=0, columnspan=2, pady=(10, 0), sticky=tk.W)
         self.studynote_button = ttk.Button(button_frame_3, text="4. Study Note 생성", command=lambda: self.start_external_script_process('4_StudyNote.py'), state="disabled")
         self.studynote_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # ✅ [새로 추가된 버튼]
+        self.ox_quiz_button = ttk.Button(button_frame_3, text="5. OX Quiz 생성", command=lambda: self.start_external_script_process('5_OX_Quiz_Creating.py'), state="disabled")
+        self.ox_quiz_button.pack(side=tk.LEFT, padx=(0, 10))
 
         progress_frame = ttk.LabelFrame(main_frame, text="진행상황", padding="5")
-        progress_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10,0)) # row 3 -> 4
+        progress_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10,0))
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100, length=300)
         self.progress_bar.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
@@ -87,7 +90,7 @@ class PDFBatchProcessor:
         self.progress_label.grid(row=1, column=0, columnspan=2, pady=(0, 5))
 
         log_frame = ttk.LabelFrame(main_frame, text="처리 로그", padding="5")
-        log_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10,0)) # row 4 -> 5
+        log_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10,0))
         self.log_text = scrolledtext.ScrolledText(log_frame, height=15, width=80)
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
@@ -100,7 +103,7 @@ class PDFBatchProcessor:
         self.finish_button.grid(row=0, column=2, padx=5, pady=5)
         
         self.root.columnconfigure(0, weight=1); self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1); main_frame.rowconfigure(5, weight=1) # row 4 -> 5
+        main_frame.columnconfigure(1, weight=1); main_frame.rowconfigure(5, weight=1)
         folder_frame.columnconfigure(1, weight=1); log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1); self.correction_frame.columnconfigure(0, weight=1)
 
@@ -111,13 +114,16 @@ class PDFBatchProcessor:
         self.process_button.config(state=state)
         self.api_button.config(state=state)
         self.audio_button.config(state=state)
-        self.studynote_button.config(state=state) # [추가] 새 버튼 상태 관리
+        self.studynote_button.config(state=state)
+        self.ox_quiz_button.config(state=state) # ✅ 새 버튼 상태 관리
         self.stop_button.config(state="normal" if is_processing else "disabled")
+        
         if not self.selected_folder:
             self.process_button.config(state="disabled")
             self.api_button.config(state="disabled")
             self.audio_button.config(state="disabled")
-            self.studynote_button.config(state="disabled") # [추가] 새 버튼 상태 관리
+            self.studynote_button.config(state="disabled")
+            self.ox_quiz_button.config(state="disabled") # ✅ 새 버튼 상태 관리
 
     def select_folder(self):
         initial_dir = self.default_folder if os.path.exists(self.default_folder) else "/"
@@ -128,7 +134,7 @@ class PDFBatchProcessor:
             self.set_ui_for_processing(False)
             self.log_message(f"폴더 선택됨: {folder_path}")
     
-    def start_external_script_process(self, script_name: str):
+    def start_external_script_process(self, script_name: str, *args):
         """외부 스크립트 실행을 위한 범용 메소드"""
         if not self.selected_folder:
             messagebox.showerror("오류", "먼저 폴더를 선택해주세요.")
@@ -137,17 +143,21 @@ class PDFBatchProcessor:
         process_name = ""
         if "2_pro_api" in script_name: process_name = "2. 해설 생성(API)"
         elif "3_description_audio" in script_name: process_name = "3. 음성 생성(TTS)"
-        elif "4_StudyNote" in script_name: process_name = "4. Study Note 생성" # [추가] 새 스크립트 이름
+        elif "4_StudyNote" in script_name: process_name = "4. Study Note 생성"
+        elif "5_OX_Quiz_Creating" in script_name: process_name = "5. OX Quiz 생성" # ✅ 새 스크립트 이름
+        elif "ox_db" in script_name: process_name = "OX Quiz DB 변환"
         
         self.log_message("\n" + "="*50)
         self.log_message(f"{process_name} 스크립트 실행 시작...")
-        if "api" in script_name or "audio" in script_name or "StudyNote" in script_name:
+        if any(keyword in script_name for keyword in ["api", "audio", "StudyNote", "Quiz"]):
             self.log_message("이 작업은 문제 수에 따라 수십 분 이상 소요될 수 있습니다.")
 
         self.set_ui_for_processing(True)
-        threading.Thread(target=self.run_external_script_in_thread, args=(script_name,), daemon=True).start()
+        # ✅ 추가 인자(args)를 받아서 command에 포함
+        command_args = [script_name] + list(args)
+        threading.Thread(target=self.run_external_script_in_thread, args=command_args, daemon=True).start()
 
-    def run_external_script_in_thread(self, script_name: str):
+    def run_external_script_in_thread(self, script_name: str, *args):
         """스레드에서 범용적으로 외부 스크립트를 실행하고 자동 연계"""
         return_code = -1
         try:
@@ -157,7 +167,8 @@ class PDFBatchProcessor:
                 self.root.after(100, lambda: self.set_ui_for_processing(False))
                 return
 
-            command = [sys.executable, script_path, self.selected_folder]
+            # ✅ 커맨드 구성 시 추가 인자 포함
+            command = [sys.executable, script_path, self.selected_folder] + list(args)
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', bufsize=1)
 
             for line in iter(process.stdout.readline, ''):
@@ -168,12 +179,19 @@ class PDFBatchProcessor:
             
             if return_code == 0:
                 self.log_message(f"\n✅ {script_name} 스크립트 실행이 성공적으로 완료되었습니다.")
-                if "2_pro_api" in script_name:
-                    messagebox.showinfo("2단계 완료", "해설 생성(API)이 완료되었습니다.\n다음 단계를 진행해주세요.")
-                elif "3_description_audio" in script_name:
-                     messagebox.showinfo("3단계 완료", "음성 생성이 완료되었습니다.")
+                # ✅ [자동 연계 로직]
+                if "5_OX_Quiz_Creating" in script_name:
+                    messagebox.showinfo("5단계 완료", "OX 퀴즈 생성이 완료되었습니다.\n자동으로 DB 변환을 시작합니다.")
+                    # bundle_id는 현재 폴더 구조에서 알 수 없으므로, 사용자 입력이나 다른 방법을 찾아야 함.
+                    # 여기서는 임시로 'default_bundle'을 사용하거나, 선택된 폴더의 마지막 부분을 사용.
+                    bundle_id = os.path.basename(self.selected_folder)
+                    self.start_external_script_process('ox_db.py', bundle_id)
+                    return # 여기서 함수를 종료하여 UI 상태가 중복으로 풀리지 않도록 함
+                elif "ox_db" in script_name:
+                     messagebox.showinfo("OX 퀴즈 DB 생성 완료", "OX 퀴즈용 DB(quiz.db) 생성이 완료되었습니다.")
                 elif "4_StudyNote" in script_name:
                      messagebox.showinfo("모든 작업 완료", "Study Note 관련 모든 프로세스가 완료되었습니다.")
+
             else:
                 self.log_message(f"\n⚠️ {script_name} 스크립트 실행 중 오류가 발생했습니다. (Return Code: {return_code})")
                 messagebox.showerror("오류", f"{script_name} 실행 중 오류가 발생했습니다. 로그를 확인해주세요.")
@@ -181,7 +199,9 @@ class PDFBatchProcessor:
         except Exception as e:
             self.log_message(f"스크립트 실행 중 심각한 오류 발생: {e}")
         finally:
-            self.root.after(100, lambda: self.set_ui_for_processing(False))
+            # ✅ 자동 연계가 아닌 경우에만 UI 상태를 풀어줌
+            if "5_OX_Quiz_Creating" not in script_name:
+                self.root.after(100, lambda: self.set_ui_for_processing(False))
     
     def start_pdf_to_db_process(self):
         """1단계: PDF -> DB 변환 프로세스를 시작합니다."""
@@ -357,7 +377,7 @@ class PDFBatchProcessor:
             return
 
         self.log_message("\n--- 디버그 수정 모드를 시작합니다 ---")
-        self.correction_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10) # row 5 -> 6
+        self.correction_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
         self.current_correction_index = -1
         self.next_correction_file()
 

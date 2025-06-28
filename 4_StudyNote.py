@@ -1,4 +1,3 @@
-
 import os
 import re
 import sys
@@ -61,8 +60,6 @@ class StudyNoteProcessor:
         self.config = config
         
         self.output_path = self.base_path / "output"
-        # ✅ 삭제: self.lib_path 제거
-        # ✅ 수정: 오디오 저장 경로 단순화
         self.audio_summary_path = self.base_path / "summary"
         self.downloads_path = Path.home() / "Downloads"
 
@@ -156,34 +153,109 @@ class StudyNoteProcessor:
                 f.write(full_content)
         return final_category_content
 
+    # ✅ 수정: _run_studynote_api 함수를 StudyNoteProcessor 클래스 안으로 이동
     def _run_studynote_api(self, category_name: str, text_content: str) -> str:
-        logger.info(f"Calling StudyNote API for '{category_name}'...")
-        system_message = """당신은 전문적인 교육강사입니다. ... (내용 생략) ..."""
-        user_prompt = f"""아래는 분석할 시험 문제 내용입니다: \n{text_content}..."""
+        """
+        시험 문제 텍스트를 분석하여 핵심 개념 중심의 학습 노트를 생성합니다.
+        """
+        logger.info(f"'{category_name}'에 대한 학습 노트 생성을 시작합니다...")
+        system_message = """
+당신은 교육 자료 전문가입니다. 주어진 시험 문제들을 분석하여, 학생들이 핵심 개념을 쉽게 파악할 수 있는 통합 학습 노트를 작성해야 합니다.
+
+**핵심 지침:**
+1.  **주제 통합:** 개별 문제를 그대로 설명하지 마세요. 여러 문제에서 공통으로 다루는 개념이나 원칙을 하나의 주제로 묶어 통합적으로 설명해야 합니다.
+2.  **구조 준수:** 아래의 출력 형식을 반드시 지켜주세요.
+    - 각 주제는 `1. 주제명` 과 같이 번호로 시작합니다.
+    - 핵심 내용은 `-` 기호를 사용해 개조식으로 명확하게 정리합니다.
+    - 주제 설명 마지막에는 `관련 문제:` 섹션을 추가하고, 관련된 모든 문제를 `-<y_bin_46>년 MM월, Question_id: NN` 형식으로 나열합니다.
+    - 주제와 주제 사이는 `---` 구분선을 넣어주세요.
+3.  **문체:** 전문적이고 간결한 서술체를 사용합니다.
+
+**출력 형식 및 예시:**
+1. 공중위생관리법의 주요 용어 정의
+   - 공중위생영업: 다수인을 대상으로 위생관리 서비스를 제공하는 영업으로, 숙박업, 목욕장업, 이용업, 미용업 등이 해당됩니다.
+   - 영업자: 관계 법령에 따라 허가/신고/등록을 하고 영업을 하는 자.
+   - 실무 적용: 허가 없이 영업 시 강력한 행정처분(영업장 폐쇄 등)이 따르므로, 창업 전 허가/신고 절차 확인이 필수적입니다.
+   관련 문제:
+   - 2023년 3월, Question_id: 15
+   - 2023년 3월, Question_id: 18
+---
+2. 소독 및 위생 기준
+   - (내용...)
+"""
+        user_prompt = f"""
+다음 시험 문제들을 분석하여, 시스템 메시지에 명시된 지침과 형식에 따라 학습 노트를 작성해주세요.
+
+[시험 문제 내용]
+{text_content}
+"""
         try:
-            response = self.openai_client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_message}, {"role": "user", "content": user_prompt}], max_tokens=4096)
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=4096,
+                temperature=0.2
+            )
             raw_content = response.choices[0].message.content
-            cleaned_content = re.sub(r'\#{2,4}|\*{2}', '', raw_content)
-            with open(self.output_path / category_name / "2.txt", 'w', encoding='utf-8') as f: f.write(cleaned_content)
+            cleaned_content = re.sub(r'^\#{2,4}\s*|(\*{2})(.*?)(\*{2})', r'\2', raw_content, flags=re.MULTILINE).strip()
+            output_file_path = self.output_path / category_name / "2.txt"
+            output_file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_file_path, 'w', encoding='utf-8') as f:
+                f.write(cleaned_content)
+            logger.info(f"학습 노트가 성공적으로 저장되었습니다: {output_file_path}")
             return cleaned_content
         except Exception as e:
-            logger.error(f"StudyNote API call failed for '{category_name}': {e}")
+            logger.error(f"'{category_name}'에 대한 학습 노트 생성 중 오류 발생: {e}")
             return ""
 
+    # ✅ 수정: _run_class_script_api 함수를 StudyNoteProcessor 클래스 안으로 이동
     def _run_class_script_api(self, category_name: str, studynote_content: str):
-        logger.info(f"Calling Class Script API for '{category_name}'...")
-        system_message = """당신은 전문 강사입니다!! ... (내용 생략) ..."""
-        user_prompt = f"""다음은 학습 노트입니다. ...\n{studynote_content}"""
+        """
+        학습 노트 내용을 기반으로, 전문 강사의 친절한 구어체 강의 스크립트를 생성합니다.
+        """
+        logger.info(f"'{category_name}'에 대한 강의 스크립트 생성을 시작합니다...")
+        system_message = """
+당신은 학생들의 눈높이에 맞춰 설명하는 전문 강사입니다. 주어진 학습 노트를 기반으로, 실제 강의처럼 친절하고 생생한 구어체 강의 스크립트를 작성해야 합니다.
+
+**스크립트 작성 원칙:**
+- **상세 설명:** 절대 요약하지 마세요. 각 개념을 하나하나 풀어서 자세히 설명해야 합니다.
+- **친절한 구어체:** 수강생에게 직접 말하듯 "자, 그럼 다음으로..." 와 같이 자연스러운 말투를 사용하세요.
+- **논리적 흐름:** 강의 내용이 처음부터 끝까지 물 흐르듯 자연스럽게 연결되도록 구성하세요.
+"""
+        user_prompt = f"""
+다음 학습 노트를 기반으로, 시스템 메시지에 명시된 원칙에 따라 강의 스크립트를 작성해주세요.
+강의는 반드시 "여러분, 안녕하세요!" 라는 인사말로 시작해야 합니다.
+
+---
+[학습 노트 내용]
+{studynote_content}
+---
+"""
         try:
-            response = self.openai_client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system_message}, {"role": "user", "content": user_prompt}], max_tokens=4096)
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=4096
+            )
             raw_content = response.choices[0].message.content
             content = re.sub(r'Question_id\s*:\s*(\d+)', r'\1번', raw_content, flags=re.IGNORECASE)
             content = re.sub(r'(\d{4}년 \d+월),', r'\1', content)
             content = re.sub(r'^- ', '', content, flags=re.MULTILINE)
-            content = re.sub(r'\#{2,4}|\*{2}|---', '', content)
-            with open(self.output_path / category_name / "3.txt", 'w', encoding='utf-8') as f: f.write(content)
+            content = re.sub(r'\#{2,4}|\*{2}|---', '', content).strip()
+            output_file_path = self.output_path / category_name / "3.txt"
+            output_file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            logger.info(f"강의 스크립트가 성공적으로 저장되었습니다: {output_file_path}")
         except Exception as e:
-            logger.error(f"Class Script API call failed for '{category_name}': {e}")
+            logger.error(f"강의 스크립트 생성 중 오류 발생 ('{category_name}'): {e}")
 
     # --- 단계 2: 강의 오디오 생성 ---
     def step2_generate_lecture_audio(self) -> bool:
@@ -326,7 +398,6 @@ class StudyNoteProcessor:
             return None
 
     def _move_final_mp3(self, mp3_path: Path, index: int):
-        # ✅ 수정: self.audio_summary_path 사용
         target_dir = self.audio_summary_path
         target_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(str(mp3_path), str(target_dir / f"lecture{index}.mp3"))
@@ -351,15 +422,16 @@ class StudyNoteProcessor:
 # --- 메인 실행 로직 ---
 if __name__ == "__main__":
     if len(sys.argv) < 2:
+        print("Usage: python 4_StudyNote.py <path_to_data_folder>")
         sys.exit(1)
     data_folder = sys.argv[1]
     if not os.path.isdir(data_folder):
+        print(f"Error: Provided path '{data_folder}' is not a valid directory.")
         sys.exit(1)
     try:
         config = Config(os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"))
         processor = StudyNoteProcessor(data_folder, config)
         
-        # ✅ 수정: Dart 파일 생성 단계(Step 3) 호출 제거
         if processor.step1_generate_ai_scripts():
             if processor.step2_generate_lecture_audio():
                 logger.info("\n✅ All processes completed successfully!")
